@@ -1,23 +1,23 @@
-var nb = require('vim-netbeans');
 var net = require('net');
 
 var listenHost = process.env.HOST || '::';
 var listenPort = process.env.PORT || 3219;
 var localhost = '127.0.0.1';
 var defaultPass = 'changeme';
-var passwordRegex = /^([^:]*|\[[0-9a-eA-E:]*\])(?::([^:]*)(?::(.*?))?)?$/;
+var authRegex = /^AUTH ([^:]*|\[[0-9a-eA-E:]*\])(?::([^:]*)(?::(.*?))?)?$/;
 
 function pipeAll(from, to, duplex) {
 	from.pipe(to);
 	from.on('end', to.end.bind(to));
-	if (duplex) {
-		pipeAll(to, from);
-	}
+	if (duplex) pipeAll(to, from);
 }
 
-var server = new nb.VimServer({debug: true});
-server.on('clientAuthed', function (client, password) {
-	var m = passwordRegex.exec(password);
+function authClient(client, data) {
+	var str = data.toString('utf8');
+	var lines = str.split('\n');
+	var m = authRegex.exec(lines[0]);
+	if (!m) return client.end();
+	var rest = lines.slice(1).join('\n');
 	var host = m[1] || localhost;
 	var port = Number(m[2]) || 3219;
 	var pass = m[3] || defaultPass;
@@ -25,19 +25,25 @@ server.on('clientAuthed', function (client, password) {
 		pass = host;
 		host = localhost;
 	}
-	console.log('host', host, 'port', port, 'pass', pass);
+	var local = client.remoteAddress + ':' + client.remotePort;
+	console.log('connection from', local, 'to', [host, port, pass].join(':'))
 	var conn = net.connect({
 		host: host,
 		port: port
 	}, function() {
-		console.log('opened');
-		client.socket.pipe(conn);
-		conn.write('AUTH ' + pass + '\n');
+		conn.write('AUTH ' + pass + '\n' + rest);
+		pipeAll(conn, client, true);
 	}).on('error', function(e) {
 		console.error(e);
+		client.end();
 	});
-	pipeAll(conn, client.socket, true);
-	client._cleanup();
+	client.on('close', function() {
+		console.log('connection from', local, 'closed')
+	});
+}
+
+var server = net.createServer(function(client) {
+	client.once('data', authClient.bind(this, client));
 });
 
 server.listen(listenPort, listenHost);
