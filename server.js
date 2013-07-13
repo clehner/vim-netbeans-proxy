@@ -31,6 +31,16 @@ function authClient(client, data) {
 		host: host,
 		port: port
 	}, function() {
+		var isLoop =
+			client.localAddress == client.remoteAddress &&
+			conn.localAddress == conn.remoteAddress &&
+			conn.remotePort == client.localPort;
+		if (isLoop) {
+			console.log('breaking loop');
+			client.end();
+			conn.end();
+			return;
+		}
 		conn.write('AUTH ' + pass + '\n' + rest);
 		pipeAll(conn, client, true);
 	}).on('error', function(e) {
